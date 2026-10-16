@@ -2,6 +2,7 @@ import { useState } from 'react';
 import BugCard from '../components/BugCard.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
+import AIAssistPanel from '../components/AIAssistPanel.jsx';
 import { useBugs } from '../hooks/useBugs.js';
 import { bugService } from '../services/api.js';
 
@@ -9,12 +10,36 @@ const STATUSES = ['open', 'assigned', 'in_progress', 'resolved', 'closed'];
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const SEVERITIES = ['minor', 'moderate', 'major', 'critical'];
 
+// The AI service uses a slightly wider severity vocabulary than the form, so
+// map its suggestions onto the options the form actually offers.
+const SEVERITY_MAP = {
+  blocker: 'critical',
+  critical: 'critical',
+  major: 'major',
+  moderate: 'moderate',
+  minor: 'minor',
+};
+
 const EMPTY_FORM = {
   title: '',
   description: '',
   priority: 'medium',
   severity: 'moderate',
 };
+
+function normalizeSeverity(value) {
+  if (!value) return null;
+  if (SEVERITY_MAP[value]) return SEVERITY_MAP[value];
+  return SEVERITIES.includes(value) ? value : null;
+}
+
+function validateForm(form) {
+  const errors = {};
+  if (!form.title.trim()) {
+    errors.title = 'Title is required.';
+  }
+  return errors;
+}
 
 export default function BugList() {
   const [filters, setFilters] = useState({ status: '', priority: '' });
@@ -27,6 +52,7 @@ export default function BugList() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const handleFilter = (event) => {
     const { name, value } = event.target;
@@ -36,16 +62,38 @@ export default function BugList() {
   const handleChange = (event) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+    setFieldErrors((prev) => ({ ...prev, [name]: undefined }));
+  };
+
+  const handleTriageResult = (result) => {
+    setForm((prev) => ({
+      ...prev,
+      priority: PRIORITIES.includes(result.suggested_priority)
+        ? result.suggested_priority
+        : prev.priority,
+      severity: normalizeSeverity(result.suggested_severity) || prev.severity,
+    }));
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setFieldErrors({});
+    setFormError(null);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    const errors = validateForm(form);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
       await bugService.create(form);
       setForm(EMPTY_FORM);
-      setModalOpen(false);
+      closeModal();
       await refetch();
     } catch (err) {
       setFormError(err.message);
@@ -106,8 +154,8 @@ export default function BugList() {
         ))}
       </ul>
 
-      <Modal open={modalOpen} title="Report a bug" onClose={() => setModalOpen(false)}>
-        <form onSubmit={handleSubmit}>
+      <Modal open={modalOpen} title="Report a bug" onClose={closeModal}>
+        <form onSubmit={handleSubmit} noValidate>
           <div className="form-field">
             <label htmlFor="bug-title">Title</label>
             <input
@@ -115,8 +163,13 @@ export default function BugList() {
               name="title"
               value={form.title}
               onChange={handleChange}
-              required
+              aria-invalid={Boolean(fieldErrors.title)}
             />
+            {fieldErrors.title && (
+              <span className="error-text" role="alert">
+                {fieldErrors.title}
+              </span>
+            )}
           </div>
           <div className="form-field">
             <label htmlFor="bug-description">Description</label>
@@ -149,10 +202,19 @@ export default function BugList() {
             </select>
           </div>
 
+          <AIAssistPanel
+            triagePayload={{
+              title: form.title,
+              description: form.description,
+            }}
+            onTriageResult={handleTriageResult}
+            triageDisabled={!form.title.trim() || form.description.trim().length < 10}
+          />
+
           {formError && <p className="error-text">{formError}</p>}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>
+            <Button variant="secondary" onClick={closeModal}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>

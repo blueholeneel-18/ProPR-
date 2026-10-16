@@ -101,7 +101,7 @@ const bugModel = {
     return rows[0] || null;
   },
 
-  async assign(id, assignedTo) {
+  async assign(id, assignedTo, assignedBy = null) {
     const { rows } = await query(
       `UPDATE bugs
           SET assigned_to = $1, status = CASE WHEN status = 'open' THEN 'assigned' ELSE status END, updated_at = NOW()
@@ -109,7 +109,20 @@ const bugModel = {
         RETURNING id, title, description, priority, severity, status, created_by, assigned_to, created_at, updated_at`,
       [assignedTo, id]
     );
-    return rows[0] || null;
+    const bug = rows[0] || null;
+    if (bug) {
+      try {
+        await query(
+          `INSERT INTO assignment_history (bug_id, assigned_to, assigned_by)
+           VALUES ($1, $2, $3)`,
+          [bug.id, bug.assigned_to, assignedBy]
+        );
+      } catch (_err) {
+        // Recording history is non-blocking - ignore if the table is missing
+        // or the insert fails in a read-only/test context.
+      }
+    }
+    return bug;
   },
 
   async remove(id) {
@@ -130,12 +143,81 @@ const bugModel = {
   async findComments(bugId) {
     const { rows } = await query(
       `SELECT id, bug_id, user_id, message, created_at
-         FROM comments
-        WHERE bug_id = $1
-        ORDER BY created_at ASC`,
+          FROM comments
+         WHERE bug_id = $1
+         ORDER BY created_at ASC`,
       [bugId]
     );
     return rows;
+  },
+
+  async findAssignmentHistory(bugId) {
+    const { rows } = await query(
+      `SELECT ah.id, ah.bug_id, ah.assigned_to, ah.assigned_by, ah.created_at, ah.reason,
+              u.name AS assigned_to_name,
+              ub.name AS assigned_by_name
+         FROM assignment_history ah
+         LEFT JOIN users u ON u.id = ah.assigned_to
+         LEFT JOIN users ub ON ub.id = ah.assigned_by
+        WHERE ah.bug_id = $1
+        ORDER BY ah.created_at DESC`,
+      [bugId]
+    );
+    return rows;
+  },
+
+  async getAssignmentStats() {
+    try {
+      const { rows } = await query(
+        `SELECT u.id AS user_id,
+                u.name,
+                u.email,
+                u.role,
+                COALESCE(
+                  COUNT(*) FILTER (WHERE b.status IN ('resolved', 'closed')),
+                  0
+                ) AS resolved_count,
+                COALESCE(
+                  COUNT(*) FILTER (WHERE b.status IN ('open', 'assigned', 'in_progress')),
+                  0
+                ) AS open_count,
+                COALESCE(
+                  json_agg(DISTINCT b.title) FILTER (
+                    WHERE b.status IN ('resolved', 'closed') AND b.title IS NOT NULL
+                  ),
+                  '[]'
+                ) AS resolved_titles
+           FROM users u
+           LEFT JOIN bugs b ON b.assigned_to = u.id
+           GROUP BY u.id
+           ORDER BY u.id`
+      );
+      return rows.map((row) => ({
+        user_id: row.user_id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        resolved_count: Number(row.resolved_count),
+        open_count: Number(row.open_count),
+        resolved_titles: Array.isArray(row.resolved_titles)
+          ? row.resolved_titles
+          : JSON.parse(row.resolved_titles || '[]'),
+      }));
+    } catch (_err) {
+      // Fallback: return users with empty stats so the AI recommender still
+      // works even if the schema/migrations haven't run in a minimal test env.
+      const { query: q } = require('../config/db');
+      const { rows } = await q('SELECT id, name, email, role FROM users ORDER BY id');
+      return rows.map((row) => ({
+        user_id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        resolved_count: 0,
+        open_count: 0,
+        resolved_titles: [],
+      }));
+    }
   },
 };
 

@@ -62,7 +62,7 @@ describe('Bugs API', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.assigned_to).toBe(7);
-      expect(bugModel.assign).toHaveBeenCalledWith('1', 7);
+      expect(bugModel.assign).toHaveBeenCalledWith('1', 7, null);
     });
 
     it('returns 400 when assigned_to is missing', async () => {

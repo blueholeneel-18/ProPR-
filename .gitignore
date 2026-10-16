@@ -24,6 +24,13 @@ yarn-error.log*
 coverage/
 */coverage/
 
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+client/test-results/
+client/playwright-report/
+
 # Editors / OS
 .DS_Store
 .idea/
