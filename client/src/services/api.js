@@ -35,6 +35,9 @@ export const bugService = {
   comments: (id) => api.get(`/bugs/${id}/comments`).then((res) => res.data.data),
   addComment: (id, message) =>
     api.post(`/bugs/${id}/comments`, { message }).then((res) => res.data.data),
+  aiTriage: (payload) => api.post('/bugs/ai-triage', payload).then((res) => res.data),
+  aiSuggestAssignee: (id) =>
+    api.post(`/bugs/${id}/ai-suggest-assignee`).then((res) => res.data),
 };
 
 export const userService = {

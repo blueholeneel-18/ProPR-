@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Button from '../components/Button.jsx';
+import AIAssistPanel from '../components/AIAssistPanel.jsx';
 import { bugService, userService } from '../services/api.js';
 import { formatDateTime, priorityClass, titleCase } from '../utils/format.js';
 
@@ -59,6 +60,22 @@ export default function BugDetail() {
     }
   };
 
+  const handleTriageResult = (result) => {
+    setBug((prev) => ({
+      ...prev,
+      priority: result.suggested_priority || prev.priority,
+      severity: result.suggested_severity || prev.severity,
+    }));
+    setNotice('AI triage suggestions applied to this view');
+  };
+
+  const handleAiAssign = async (userId) => {
+    const updated = await bugService.assign(id, userId);
+    setBug((prev) => ({ ...prev, ...updated }));
+    setAssignee(userId);
+    setNotice('Bug assigned successfully');
+  };
+
   if (loading) return <p className="muted">Loading bug…</p>;
   if (error) return <p className="error-text">{error}</p>;
   if (!bug) return <p className="muted">Bug not found.</p>;
@@ -104,6 +121,18 @@ export default function BugDetail() {
           </Button>
         </div>
       </div>
+
+      <AIAssistPanel
+        bugId={bug.id}
+        triagePayload={{
+          title: bug.title,
+          description: bug.description,
+          steps_to_reproduce: bug.steps_to_reproduce,
+        }}
+        onTriageResult={handleTriageResult}
+        onAssign={handleAiAssign}
+        triageDisabled={!bug.title}
+      />
 
       <div className="card">
         <h2>Comments</h2>
